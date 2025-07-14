@@ -1,0 +1,13 @@
+textract-py3
+lightrag-hku
+tree-sitter
+tree-sitter-python
+tree-sitter-cpp
+tree-sitter-java
+langchain==0.3.26
+langchain_openai
+langgraph
+transformers==4.53.1
+python-dotenv
+torch==2.6.0
+tensorflow==2.18.0

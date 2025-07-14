@@ -1,0 +1,5 @@
+.env
+*/__pycache__
+read_dir/*
+storage_dir/*
+output/*
