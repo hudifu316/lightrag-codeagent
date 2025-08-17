@@ -2,19 +2,23 @@ import os
 import re
 import asyncio
 from typing import List, Dict, Set, TypedDict
-from dataclasses import dataclass
-from enum import Enum
 
 # LangGraph関連のインポート
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import AnyMessage, HumanMessage, AIMessage
 
 # OpenAI関連
 from openai import OpenAI
 from ragindex.config import LightRAGConfig
 from ragindex.query_tool import LightRAGQueryTool  # 追加
+
+# 自作モジュール
+from ragagent.models import LayerType, FrameworkType, SourceFile
+from ragagent.analyzer import LayerClassifier, FrameworkDetector
+
+load_dotenv()
 
 config = LightRAGConfig(
         storage_dir="./storage_dir",
@@ -23,43 +27,10 @@ config = LightRAGConfig(
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_base_url=os.getenv("OPENAI_BASE_URL"),
         )
-class LayerType(Enum):
-    """アーキテクチャレイヤの種類"""
-    VIEW = "view"
-    CONTROLLER = "controller"
-    SERVICE = "service"
-    REPOSITORY = "repository"
-    DOMAIN = "domain"
-    UTIL = "util"
-    CONFIG = "config"
-    UNKNOWN = "unknown"
-
-class FrameworkType(Enum):
-    """フレームワークの種類"""
-    SPRING_BOOT = "spring_boot"
-    DJANGO = "django"
-    FLASK = "flask"
-    REACT = "react"
-    VUE = "vue"
-    ANGULAR = "angular"
-    EXPRESS = "express"
-    LARAVEL = "laravel"
-    RAILS = "rails"
-    UNKNOWN = "unknown"
-
-@dataclass
-class SourceFile:
-    """ソースファイル情報"""
-    path: str
-    content: str
-    extension: str
-    layer: LayerType
-    dependencies: Set[str]
-    framework: FrameworkType
 
 class GraphState(TypedDict):
     """LangGraphの状態管理"""
-    messages: List[HumanMessage | AIMessage | SystemMessage]
+    messages: List[AnyMessage]
     workspace_path: str
     source_files: List[SourceFile]
     framework: FrameworkType
@@ -68,124 +39,8 @@ class GraphState(TypedDict):
     design_documents: List[Dict]
     current_file_index: int
     output_path: str
-    api_key: str
     extensions: List[str]
 
-class LayerClassifier:
-    """レイヤ分類クラス"""
-    def __init__(self):
-        self.layer_patterns = {
-            LayerType.VIEW: [
-                r'\.html$', r'\.jsx$', r'\.vue$', r'\.tsx$',
-                r'template', r'view', r'component',
-                r'@Component', r'render\(', r'<template>'
-            ],
-            LayerType.CONTROLLER: [
-                r'Controller', r'@RestController', r'@Controller',
-                r'views\.py', r'@app\.route', r'router',
-                r'express\.Router', r'def\s+\w+\(request'
-            ],
-            LayerType.SERVICE: [
-                r'Service', r'@Service', r'Business',
-                r'Logic', r'UseCase', r'Application'
-            ],
-            LayerType.REPOSITORY: [
-                r'Repository', r'@Repository', r'DAO',
-                r'models\.py', r'Model', r'Entity',
-                r'@Entity', r'ActiveRecord'
-            ],
-            LayerType.DOMAIN: [
-                r'Domain', r'Entity', r'ValueObject',
-                r'Aggregate', r'DomainService'
-            ],
-            LayerType.CONFIG: [
-                r'config', r'Config', r'settings',
-                r'application\.properties', r'\.env'
-            ],
-            LayerType.UTIL: [
-                r'util', r'Util', r'helper', r'Helper',
-                r'common', r'Common'
-            ]
-        }
-
-    def classify_layer(self, file: SourceFile) -> LayerType:
-        """ファイルのレイヤを分類"""
-        content_and_path = f"{file.path} {file.content}"
-
-        for layer, patterns in self.layer_patterns.items():
-            for pattern in patterns:
-                if re.search(pattern, content_and_path, re.IGNORECASE):
-                    return layer
-
-        return LayerType.UNKNOWN
-
-class FrameworkDetector:
-    """フレームワーク検出クラス"""
-
-    def __init__(self):
-        self.framework_patterns = {
-            FrameworkType.SPRING_BOOT: [
-                r'@SpringBootApplication',
-                r'@RestController',
-                r'@Service',
-                r'@Repository',
-                r'springframework'
-            ],
-            FrameworkType.DJANGO: [
-                r'from django',
-                r'django.db.models',
-                r'django.views',
-                r'django.urls'
-            ],
-            FrameworkType.FLASK: [
-                r'from flask',
-                r'Flask\(',
-                r'@app.route'
-            ],
-            FrameworkType.REACT: [
-                r'import React',
-                r'from [\'"]react[\'"]',
-                r'jsx',
-                r'useState',
-                r'useEffect'
-            ],
-            FrameworkType.VUE: [
-                r'import Vue',
-                r'from [\'"]vue[\'"]',
-                r'\.vue$'
-            ],
-            FrameworkType.EXPRESS: [
-                r'express\(',
-                r'app\.get\(',
-                r'app\.post\('
-            ],
-            FrameworkType.LARAVEL: [
-                r'use Illuminate',
-                r'extends Controller',
-                r'Eloquent'
-            ],
-            FrameworkType.RAILS: [
-                r'ActionController::Base',
-                r'ActiveRecord::Base',
-                r'Rails\.application'
-            ]
-        }
-
-    def detect_framework(self, files: List[SourceFile]) -> FrameworkType:
-        """ファイル群からフレームワークを検出"""
-        framework_scores = {fw: 0 for fw in FrameworkType}
-
-        for file in files:
-            for framework, patterns in self.framework_patterns.items():
-                for pattern in patterns:
-                    if re.search(pattern, file.content, re.IGNORECASE):
-                        framework_scores[framework] += 1
-
-        max_score = max(framework_scores.values())
-        if max_score == 0:
-            return FrameworkType.UNKNOWN
-
-        return max(framework_scores, key=lambda fw: framework_scores[fw])
 
 # LangGraphのノード関数群
 async def scan_files_node(state: GraphState) -> GraphState:
@@ -318,7 +173,7 @@ async def generate_design_docs_node(state: GraphState) -> GraphState:
     print("設計書を生成しています...")
 
     generated_docs = []
-    client = OpenAI(api_key=state["api_key"])
+    client = OpenAI(api_key=config.openai_api_key)
     # テンプレート定義
     templates = {
         LayerType.VIEW: ["入力項目", "出力項目", "操作項目", "入力チェック", "操作時処理概要", "画面遷移先"],
@@ -515,7 +370,7 @@ async def main():
     # parser.add_argument('--output', '-o', help='出力ディレクトリ', default='design_documents')
 
     # args = parser.parse_args()
-    load_dotenv()
+
     workspace = "./read_dir"  # args.workspace
     output_path = "./output"  # args.output
     api_key = os.getenv("OPENAI_API_KEY")or""  # args.api_key
