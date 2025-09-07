@@ -31,8 +31,8 @@ if __name__ == "__main__":
         query_tool = tools[1]
         try:
             # インデックス化例
-            #result = await index_tool._run("./read_dir")
-            #print(f"インデックス化結果: {result}")
+            result = index_tool._run("./read_dir")
+            print(f"インデックス化結果: {result}")
 
             # 質問応答例
             answer = query_tool._run("UserBillController.warikan()の呼び出しシーケンス図をMermaid記法で出力してください")

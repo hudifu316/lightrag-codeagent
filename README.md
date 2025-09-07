@@ -18,11 +18,11 @@ lightragを使ってソースコードおよびドキュメントの依存関係
 1. 解析したプロジェクトを`read_dir`配下にコピー
 1. indexerを動かしてRAGインスタンスを作成
     ```bash
-    python main.py
+    python lightrag_indexer.py
     ```
 1. ragagentを動かして設計情報を取得
     ```bash
-    python ragagent.py
+    python lightrag_agent.py 
     ```
 
 ## 参考

@@ -29,6 +29,53 @@ config = LightRAGConfig(
         openai_base_url=os.getenv("OPENAI_BASE_URL"),
         )
 
+# ドキュメント内のパスを絶対パスに変換するヘルパー関数
+def convert_relative_paths_to_absolute(content):
+    """
+    ドキュメント内の相対パスを絶対パスに変換する
+    例: ./read_dir/file.md → /read_dir/file.md
+    """
+    # Markdownリンクパターンを検出: [text](path)
+    link_pattern = r'\[([^\]]+)\]\(([^)]+)\)'
+    
+    def replace_path(match):
+        link_text = match.group(1)
+        path = match.group(2)
+        
+        # 既に絶対パスの場合はそのまま
+        if path.startswith('/'):
+            return match.group(0)
+            
+        # 相対パスの場合は絶対パスに変換
+        if path.startswith('./'):
+            # ./で始まる相対パスを処理
+            absolute_path = '/' + path[2:]
+            return f'[{link_text}]({absolute_path})'
+        elif path.startswith('../'):
+            # ../で始まる相対パスを処理
+            parts = path.split('/')
+            up_count = 0
+            for part in parts:
+                if part == '..':
+                    up_count += 1
+                else:
+                    break
+            
+            # 上位ディレクトリに移動した後のパス
+            remaining_path = '/'.join(parts[up_count:])
+            # ワークスペースのルートからの絶対パス
+            absolute_path = '/' + remaining_path
+            return f'[{link_text}]({absolute_path})'
+        else:
+            # その他の相対パス (現在のディレクトリからの相対パス)
+            absolute_path = '/' + path
+            return f'[{link_text}]({absolute_path})'
+    
+    # リンクパターンを置換
+    content = re.sub(link_pattern, replace_path, content)
+    
+    return content
+
 class GraphState(TypedDict):
     """LangGraphの状態管理"""
     messages: List[AnyMessage]
@@ -229,8 +276,6 @@ async def analyze_dependencies_node(state: GraphState) -> GraphState:
             """
             result = await dependency_analyzer_tool._arun(query)
 
-            # print(f"ファイル '{file.path}' の依存関係: {result}")
-
             # LightRAGの出力から依存関係を抽出する高度な実装
             dependencies = set()
             
@@ -429,6 +474,9 @@ async def generate_business_flow_docs_node(state: GraphState) -> GraphState:
             )
 
             doc_content = response.choices[0].message.content
+            
+            # ドキュメント内の相対パスを絶対パスに変換
+            doc_content = convert_relative_paths_to_absolute(doc_content)
 
             # ファイル名を生成（エントリーポイントのファイル名を基に）
             entry_filename = os.path.basename(entry_file_path)
@@ -453,104 +501,107 @@ async def generate_business_flow_docs_node(state: GraphState) -> GraphState:
 
     return state
 
-# async def generate_design_docs_node(state: GraphState) -> GraphState:
-#     """設計書生成ノード"""
-#     print("設計書を生成しています...")
+async def generate_design_docs_node(state: GraphState) -> GraphState:
+    """設計書生成ノード"""
+    print("設計書を生成しています...")
 
-#     generated_docs = []
-#     client = OpenAI(api_key=config.openai_api_key)
-#     # テンプレート定義
-#     templates = {
-#         LayerType.VIEW: ["入力項目", "出力項目", "操作項目", "入力チェック", "操作時処理概要", "画面遷移先"],
-#         LayerType.CONTROLLER: ["入力項目", "出力項目", "入力チェック", "処理概要", "例外処理"],
-#         LayerType.SERVICE: ["入力項目", "出力項目", "入力チェック", "処理概要", "例外処理"],
-#         LayerType.REPOSITORY: ["データ項目定義", "ER図", "データアクセス処理"],
-#         LayerType.DOMAIN: ["ドメインオブジェクト", "ビジネスルール", "不変条件"]
-#     }
+    generated_docs = []
+    client = OpenAI(api_key=config.openai_api_key)
+    # テンプレート定義
+    templates = {
+        LayerType.VIEW: ["入力項目", "出力項目", "操作項目", "入力チェック", "操作時処理概要", "画面遷移先"],
+        LayerType.CONTROLLER: ["入力項目", "出力項目", "入力チェック", "処理概要", "例外処理"],
+        LayerType.SERVICE: ["入力項目", "出力項目", "入力チェック", "処理概要", "例外処理"],
+        LayerType.REPOSITORY: ["データ項目定義", "ER図", "データアクセス処理"],
+        LayerType.DOMAIN: ["ドメインオブジェクト", "ビジネスルール", "不変条件"]
+    }
 
-#     # 出力ディレクトリ作成
-#     output_path = state["output_path"]
-#     os.makedirs(output_path, exist_ok=True)
-#     dependency_analyzer_tool = LightRAGQueryTool(config=config)
+    # 出力ディレクトリ作成
+    output_path = state["output_path"]
+    os.makedirs(output_path, exist_ok=True)
+    dependency_analyzer_tool = LightRAGQueryTool(config=config)
 
-#     for i, file in enumerate(state["source_files"]):
-#         print(f"処理中 ({i+1}/{len(state['source_files'])}): {file.path}")
+    for i, file in enumerate(state["source_files"]):
+        print(f"処理中 ({i+1}/{len(state['source_files'])}): {file.path}")
 
-#         try:
-#             # LightRAGを使用して依存関係を分析
-#             query = f"ファイル '{file.path}' の設計に関連する情報、依存関係、使用パターンを教えてください。"
-#             context = await dependency_analyzer_tool._arun(query)
+        try:
+            # LightRAGを使用して依存関係を分析
+            query = f"ファイル '{file.path}' の設計に関連する情報、依存関係、使用パターンを教えてください。"
+            context = await dependency_analyzer_tool._arun(query)
 
-#             # プロンプト構築
-#             template_sections = templates.get(file.layer, ["概要", "機能", "実装詳細"])
+            # プロンプト構築
+            template_sections = templates.get(file.layer, ["概要", "機能", "実装詳細"])
 
-#             prompt = f"""
-# 以下のソースコードを分析して、{file.layer.value}層の設計書をMarkdown形式で生成してください。
+            prompt = f"""
+以下のソースコードを分析して、{file.layer.value}層の設計書をMarkdown形式で生成してください。
 
-# ## ファイル情報
-# - パス: {file.path}
-# - フレームワーク: {state['framework'].value}
-# - レイヤ: {file.layer.value}
+## ファイル情報
+- パス: {file.path}
+- フレームワーク: {state['framework'].value}
+- レイヤ: {file.layer.value}
 
-# ## 関連情報（LightRAGより）
-# {context}
+## 関連情報（LightRAGより）
+{context}
 
-# ## 分析対象コード
-# ```
-# {file.content[:4000]}  # トークン制限のため切り詰め
-# ```
+## 分析対象コード
+```
+{file.content[:4000]}  # トークン制限のため切り詰め
+```
 
-# ## 出力形式
-# 以下のセクションを含む設計書を作成してください：
-# {chr(10).join([f"- {section}" for section in template_sections])}
+## 出力形式
+以下のセクションを含む設計書を作成してください：
+{chr(10).join([f"- {section}" for section in template_sections])}
 
-# ## 特別な指示
-# - クラス図、シーケンス図、ER図はMermaid記法で記述してください
-# - 具体的なコードの内容に基づいて分析してください
-# - {state['framework'].value}フレームワークの特徴を考慮してください
-# - 日本語で記述してください
-# """
+## 特別な指示
+- クラス図、シーケンス図、ER図はMermaid記法で記述してください
+- 具体的なコードの内容に基づいて分析してください
+- {state['framework'].value}フレームワークの特徴を考慮してください
+- 日本語で記述してください
+"""
 
-#             # OpenAI APIで設計書生成
-#             response = client.chat.completions.create(
-#                 model="gpt-4.1",
-#                 messages=[
-#                     {"role": "system", "content": "あなたは経験豊富なソフトウェアアーキテクトです。ソースコードを分析して詳細な設計書を作成してください。"},
-#                     {"role": "user", "content": prompt}
-#                 ],
-#                 max_tokens=4000,
-#                 temperature=0.3
-#             )
+            # OpenAI APIで設計書生成
+            response = client.chat.completions.create(
+                model="gpt-4.1",
+                messages=[
+                    {"role": "system", "content": "あなたは経験豊富なソフトウェアアーキテクトです。ソースコードを分析して詳細な設計書を作成してください。"},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=4000,
+                temperature=0.3
+            )
 
-#             doc_content = response.choices[0].message.content
+            doc_content = response.choices[0].message.content
+            
+            # ドキュメント内の相対パスを絶対パスに変換
+            doc_content = convert_relative_paths_to_absolute(doc_content)
 
-#             # ファイル保存
-#             safe_filename = re.sub(r'[^\w\-_.]', '_', os.path.basename(file.path))
-#             doc_filename = f"{safe_filename}_{file.layer.value}_design.md"
-#             doc_path = os.path.join(output_path, doc_filename)
+            # ファイル保存
+            safe_filename = re.sub(r'[^\w\-_.]', '_', os.path.basename(file.path))
+            doc_filename = f"{safe_filename}_{file.layer.value}_design.md"
+            doc_path = os.path.join(output_path, doc_filename)
 
-#             with open(doc_path, 'w', encoding='utf-8') as f:
-#                 f.write(doc_content or "")
+            with open(doc_path, 'w', encoding='utf-8') as f:
+                f.write(doc_content or "")
 
-#             generated_docs.append({
-#                 'source_file': file.path,
-#                 'design_doc': doc_path,
-#                 'layer': file.layer.value
-#             })
+            generated_docs.append({
+                'source_file': file.path,
+                'design_doc': doc_path,
+                'layer': file.layer.value
+            })
 
-#         except Exception as e:
-#             print(f"設計書生成エラー: {file.path} - {e}")
+        except Exception as e:
+            print(f"設計書生成エラー: {file.path} - {e}")
 
-#     state["design_documents"] = generated_docs
-#     state["messages"].append(AIMessage(content=f"{len(generated_docs)}個の設計書を生成しました"))
+    state["design_documents"] = generated_docs
+    state["messages"].append(AIMessage(content=f"{len(generated_docs)}個の設計書を生成しました"))
 
-#     return state
+    return state
 
 async def generate_summary_node(state: GraphState) -> GraphState:
     """サマリー生成ノード"""
     print("サマリーを生成しています...")
 
-    # docs = state["design_documents"]
+    docs = state["design_documents"]
     business_flow_docs = state.get("business_flow_documents", [])
     dependency_graph = state["dependency_graph"]
     framework = state["framework"]
@@ -561,7 +612,7 @@ async def generate_summary_node(state: GraphState) -> GraphState:
 ## 概要
 - 分析対象: {state['workspace_path']}
 - 検出フレームワーク: {framework.value}
-# - ファイル単位設計書数: len(docs)
+- ファイル単位設計書数: {len(docs)}
 - 業務フロー単位設計書数: {len(business_flow_docs)}
 
 ## アーキテクチャ構成
@@ -571,9 +622,9 @@ async def generate_summary_node(state: GraphState) -> GraphState:
 
     # レイヤ別統計
     layer_stats = {}
-    # for doc in docs:
-    #     layer = doc['layer']
-    #     layer_stats[layer] = layer_stats.get(layer, 0) + 1
+    for doc in docs:
+        layer = doc['layer']
+        layer_stats[layer] = layer_stats.get(layer, 0) + 1
 
     for layer, count in layer_stats.items():
         summary_content += f"- {layer}: {count}ファイル\n"
@@ -611,13 +662,34 @@ async def generate_summary_node(state: GraphState) -> GraphState:
             if entry_point and doc_path:
                 summary_content += f"- [{os.path.basename(doc_path)}]({doc_path}) - エントリーポイント: {os.path.basename(entry_point)}\n"
 
-    # # ファイル単位の設計書一覧
-    # summary_content += "\n## ファイル単位設計書一覧\n\n"
-    # for doc in docs:
-    #     summary_content += f"- [{os.path.basename(doc['design_doc'])}]({doc['design_doc']}) - {doc['layer']}層\n"
+    # ファイル単位の設計書一覧（レイヤーごとの表形式）
+    summary_content += "\n## ファイル単位設計書一覧\n\n"
+    
+    # レイヤーごとにドキュメントをグループ化
+    layer_docs = {}
+    for doc in docs:
+        layer = doc['layer']
+        if layer not in layer_docs:
+            layer_docs[layer] = []
+        layer_docs[layer].append(doc)
+    
+    # レイヤーごとに表形式で出力
+    for layer, layer_doc_list in sorted(layer_docs.items()):
+        summary_content += f"### {layer}層\n\n"
+        summary_content += "| ファイル名 | 設計書リンク |\n"
+        summary_content += "| -------- | ---------- |\n"
+        for doc in layer_doc_list:
+            source_file = os.path.basename(doc['source_file'])
+            design_doc_name = os.path.basename(doc['design_doc'])
+            summary_content += f"| {source_file} | [{design_doc_name}]({doc['design_doc']}) |\n"
+        summary_content += "\n"
 
     # サマリーファイル保存
     summary_path = os.path.join(output_path, "README.md")
+    
+    # READMEのコンテンツ内のパスも絶対パスに変換
+    summary_content = convert_relative_paths_to_absolute(summary_content)
+    
     with open(summary_path, 'w', encoding='utf-8') as f:
         f.write(summary_content)
 
@@ -642,7 +714,7 @@ def create_workflow():
     workflow.add_node("classify_layers", classify_layers_node)
     workflow.add_node("detect_entry_points", detect_entry_points_node)  # エントリーポイント検出ノード追加
     workflow.add_node("analyze_dependencies", analyze_dependencies_node)
-    # workflow.add_node("generate_design_docs", generate_design_docs_node)
+    workflow.add_node("generate_design_docs", generate_design_docs_node)
     workflow.add_node("generate_business_flow_docs", generate_business_flow_docs_node)  # 業務フロー設計書生成ノード追加
     workflow.add_node("generate_summary", generate_summary_node)
     workflow.add_node("tools", tool_node)
@@ -653,9 +725,8 @@ def create_workflow():
     workflow.add_edge("detect_framework", "classify_layers")
     workflow.add_edge("classify_layers", "detect_entry_points")  # レイヤ分類後にエントリーポイント検出
     workflow.add_edge("detect_entry_points", "analyze_dependencies")
-    # workflow.add_edge("analyze_dependencies", "generate_design_docs")
-    # workflow.add_edge("generate_design_docs", "generate_business_flow_docs")  # ファイル単位設計書生成後に業務フロー設計書生成
-    workflow.add_edge("analyze_dependencies", "generate_business_flow_docs")  # 依存関係分析後に業務フロー設計書生成
+    workflow.add_edge("analyze_dependencies", "generate_design_docs")
+    workflow.add_edge("generate_design_docs", "generate_business_flow_docs")  # ファイル単位設計書生成後に業務フロー設計書生成
     workflow.add_edge("generate_business_flow_docs", "generate_summary")
     workflow.add_edge("generate_summary", END)
 
@@ -685,7 +756,6 @@ async def main():
             "extensions": extensions,
             "entry_points": []
         }
-        print(app.get_graph().draw_mermaid())
 
         # ワークフローを実行
         async for output in app.astream(initial_state):
