@@ -53,7 +53,8 @@ class LightRAGQueryTool(BaseTool):
                 mode="hybrid",
                 top_k=5,
                 conversation_history=[],
-                history_turns=5
+                history_turns=5,
+                enable_rerank=False
             )
 
             # クエリ実行
@@ -91,7 +92,7 @@ class LightRAGQueryTool(BaseTool):
         rag = LightRAG(
             working_dir=self.config.storage_dir,
             llm_model_func=llm_func,
-            llm_model_max_token_size=self.config.llm_max_token_size,
+            max_total_tokens=self.config.llm_max_token_size,
             embedding_func=EmbeddingFunc(
                 func=embedding_func,
                 max_token_size=self.config.emb_max_token_size,

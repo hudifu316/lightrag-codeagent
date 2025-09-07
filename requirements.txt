@@ -1,12 +1,12 @@
-textract-py3
-lightrag-hku
-tree-sitter
+textract-py3==2.1.1
+lightrag-hku==1.4.5
+tree-sitter==0.25.0
 tree-sitter-python
 tree-sitter-cpp
 tree-sitter-java
 langchain==0.3.26
 langchain_openai
-langgraph
+langgraph==0.6.2
 transformers==4.53.1
 python-dotenv
 torch==2.6.0

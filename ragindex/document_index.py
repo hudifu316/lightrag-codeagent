@@ -129,7 +129,7 @@ class DocumentIndexTool(BaseTool):
             working_dir=self.config.storage_dir,
             max_parallel_insert=self.config.parallel_num,
             llm_model_func=llm_func,
-            llm_model_max_token_size=self.config.llm_max_token_size,
+            max_total_tokens=self.config.llm_max_token_size,
             embedding_func=EmbeddingFunc(
                 func=embedding_func,
                 max_token_size=self.config.emb_max_token_size,

@@ -3,8 +3,8 @@
 """
 
 import re
-from typing import List, Dict
-from models import LayerType, FrameworkType, SourceFile
+from typing import List
+from .models import LayerType, FrameworkType, SourceFile
 
 class LayerClassifier:
     """レイヤ分類クラス"""
